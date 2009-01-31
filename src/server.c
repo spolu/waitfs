@@ -1,5 +1,6 @@
 #include "server.h"
 #include "session.h"
+#include "io.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -11,6 +12,8 @@
 #include <string.h>
 #include <unistd.h>
 #include <pthread.h>
+
+extern char *mount_path;
 
 static pthread_t last_tid;
 
@@ -41,24 +44,92 @@ void * start_srv (void * arg)
 void * handle (void * arg)
 {
   sid_t sid;
+  lid_t lid;
+
+  char * cmd_line;
+  char *cmd_str, *uid_str, *lid_str;
+  char * path;
+
+  off_t pos;
+  size_t cmd_len;
+
   int cli_sd = *((int *) arg);
 
   /*
    * TODO : read the uid
    */
-
   sid = session_create (0); 
   
-  while (1)
+  for (;;)
     {
-      /*
-       * read command one line
-       * parse command
-       * check command
-       * apply
-       * reply one line
-       */      
+      if ((cmd_line = readline (cli_sd)) == NULL)
+	break;
+      pos = 0;
+      cmd_len = strlen (cmd_line);
+            
+      for (pos = 0; cmd_line[pos] !=' ' && pos < cmd_len; pos ++);
+      cmd_line[pos] = 0;
+      cmd_str = cmd_line;
+      
+      if (strcmp (cmd_str, GETLINK_CMD) == 0) 
+	{
+	  lid = session_getlink (sid);
+
+	  if (lid > 0) 
+	    {
+	      char * ret = (char *) malloc (strlen (mount_path) + 128);
+
+	      if (path == NULL)
+		goto error;
+
+	      sprintf (ret, "%s %d %s/%d/%d", OK_CMD, lid, mount_path, sid, lid);
+	      writeline (cli_sd, ret, strlen (ret), LF);
+
+	      free (ret);
+	      goto done;
+	    }
+	  else
+	    goto error;
+	}
+      
+      else if (strcmp (cmd_str, SETLINK_CMD) == 0) 
+	{
+	  if (pos + 1 >= cmd_len)
+	    goto error;
+
+	  lid_str = cmd_line + (pos + 1);
+
+	  for (;cmd_line[pos] != ' ' && pos < cmd_len; pos ++);
+	  cmd_line[pos] = 0; 
+
+	  lid = atoi (lid_str);
+
+	  if (pos + 1 >= cmd_len)
+	    goto error;
+
+	  path = cmd_line + (pos + 1);
+	  
+	  /*
+	   * TODO: sanitize path
+	   */ 
+
+	  if (session_setlink (sid, lid, path) != 0)
+	    goto error;
+	  
+	  writeline (cli_sd, OK_CMD, strlen (OK_CMD), LF);
+	}
+      
+    done:
+      if (cmd_line != NULL)
+	free (cmd_line);
+      continue;
+
+    error:
+      writeline (cli_sd, ERROR_CMD, strlen (ERROR_CMD), LF);
+      goto done;      
     }  
   
   session_destroy (sid);
+
+  return NULL;
 }

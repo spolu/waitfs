@@ -13,40 +13,49 @@
 #define FUSE_USE_VERSION 26
 #include <fuse.h>
 
-#define SOCK_PATH "/dev/waitfs"
+#define SOCK_PATH "/Users/spolu/waitfs"
 
 #include "server.h"
+#include "session.h"
 
 static pthread_t srv_tid;
+char *mount_path = "/mnt/waitfs";
 
 int main (int argc, char *argv[])
 {  
-  int sd, len;
-  struct sockaddr_un local;
+  int sd;
+  socklen_t len;
+  struct sockaddr_un sun_addr;
 
-  if ((sd = socket(AF_UNIX, SOCK_STREAM, 0)) == -1) {
-    perror("socket");
-    exit(1);
+  init_session ();
+
+  if ((sd = socket (AF_UNIX, SOCK_STREAM, 0)) < 0) {
+    perror ("socket");
+    exit (1);
   }
 
-  local.sun_family = AF_UNIX;
-  strcpy(local.sun_path, SOCK_PATH);
-  unlink(local.sun_path);
+  memset (&sun_addr, 0, sizeof (sun_addr));
+  sun_addr.sun_family = AF_UNIX;
+  strncpy (sun_addr.sun_path, SOCK_PATH, sizeof (sun_addr.sun_path));
 
-  len = strlen(local.sun_path) + sizeof(local.sun_family);
-  if (bind(sd, (struct sockaddr *)&local, len) == -1) {
-    perror("bind");
-    exit(1);
+  unlink (sun_addr.sun_path);
+
+  len = strlen (sun_addr.sun_path) + sizeof (sun_addr.sun_family) + 1;
+  if (bind (sd, (struct sockaddr *) &sun_addr, len) < 0) {
+    perror ("bind");
+    exit (1);
   }
 
-  if (listen(sd, 10) == -1) {
-    perror("listen");
-    exit(1);
+  if (listen (sd, 10) < 0) {
+    perror ("listen");
+    exit (1);
   }
 
   pthread_create (&srv_tid, NULL, &start_srv, (void *) &sd);
-  pthread_detach (srv_tid);
+  //pthread_detach (srv_tid);
   
+  pthread_join (srv_tid, NULL);
+
   //return fuse_main (argc, argv, &test_oper, NULL);
   return 0;
 }
