@@ -20,4 +20,7 @@ int session_setlink (sid_t sid, lid_t lid, const char * path);
  */ 
 ssize_t session_readlink (sid_t sid, lid_t lid, char *buf, size_t bufsize);
 
+sid_t * list_sessions ();
+lid_t * list_links (sid_t sid);
+
 #endif

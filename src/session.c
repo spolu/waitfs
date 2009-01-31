@@ -57,9 +57,6 @@ static pthread_mutex_t session_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static int last_sid = 0;
 
-static char * devnull = "/dev/null";
-
-
 int init_session ()
 {
   list_init (&session_list);
@@ -125,19 +122,7 @@ int session_destroy (sid_t sid)
       pthread_mutex_lock (&link->mutex);
       
       if (link->path == NULL) 
-	{
-	  link->path = (char *) malloc (strlen (devnull) + 1);
-	  
-	  if (link->path == NULL) {
-	    pthread_mutex_unlock (&link->mutex);
-	    return -1;
-	  }
-	  
-	  memset (link->path, 0, strlen (devnull) + 1);
-	  strncpy (link->path, devnull, strlen (devnull));
-	  
-	  pthread_cond_broadcast (&link->cond_set);		
-	}
+	pthread_cond_broadcast (&link->cond_set);		
       
       
       while (link->waiter_cnt > 0) 
@@ -325,3 +310,92 @@ ssize_t session_readlink (sid_t sid, lid_t lid, char *buf, size_t bufsize)
 }
 
 
+sid_t * list_sessions ()
+{
+  struct list_elem *e;
+  size_t size;
+  sid_t * ret = NULL;
+  off_t pos = 0;
+
+  pthread_mutex_lock (&session_mutex);
+
+  size = list_size (&session_list);
+
+  if (size == 0) {
+    pthread_mutex_unlock (&session_mutex);
+    return NULL;
+  }
+
+  ret = (sid_t *) malloc (sizeof (sid_t) * (size + 1));
+
+  if (ret == NULL) {
+    pthread_mutex_unlock (&session_mutex);
+    return NULL;
+  }
+  
+  for (e = list_begin (&session_list); e != list_end (&session_list);
+       e = list_next (e))
+    {
+      session_t *s = list_entry (e, session_t, elem);
+      ret[pos++] = s->sid;
+    }
+  
+  ret[pos] = 0;
+
+  pthread_mutex_unlock (&session_mutex);
+  
+  return ret;
+}
+
+
+lid_t * list_links (sid_t sid)
+{
+  struct list_elem *e;
+  session_t * session = NULL;
+  lid_t * ret = NULL;
+  size_t size;
+  off_t pos = 0;
+
+  pthread_mutex_lock (&session_mutex);
+
+  for (e = list_begin (&session_list); e != list_end (&session_list);
+       e = list_next (e))
+    {
+      session_t *s = list_entry (e, session_t, elem);
+      if (s->sid == sid)
+	  session = s;
+    }
+
+  if (session == NULL) {
+    pthread_mutex_unlock (&session_mutex);
+    return NULL;
+  }
+  
+  size = list_size (&session_list);
+
+  if (size == 0) {
+    pthread_mutex_unlock (&session_mutex);
+    return NULL;
+  }
+    
+
+  ret = (sid_t *) malloc (sizeof (sid_t) * (size + 1));
+  
+  if (ret == NULL) {
+    pthread_mutex_unlock (&session_mutex);
+    return NULL;
+  }
+
+  for (e = list_begin (&session->link_list); e != list_end (&session->link_list);
+       e = list_next (e))
+    {
+      link_t *l = list_entry (e, link_t, elem);
+      ret[pos++] = l->lid;
+    }
+
+  ret[pos] = 0;
+
+  pthread_mutex_unlock (&session_mutex);
+  
+  return ret;
+}

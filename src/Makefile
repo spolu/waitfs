@@ -3,7 +3,7 @@ CFLAGS = -Wall -g -std=gnu99 -D_FILE_OFFSET_BITS=64
 LIBS = -lpthread -lfuse
 MAKE = make
 
-WAITFS_SRC = waitfs.c session.c server.c list.c io.c
+WAITFS_SRC = waitfs.c session.c server.c list.c io.c fuse.c
 
 waitfs_obj = $(WAITFS_SRC:.c=.o)
 

@@ -21,6 +21,8 @@
 static pthread_t srv_tid;
 char *mount_path = "/mnt/waitfs";
 
+extern struct fuse_operations waitfs_oper;
+
 int main (int argc, char *argv[])
 {  
   int sd;
@@ -52,13 +54,11 @@ int main (int argc, char *argv[])
   }
 
   pthread_create (&srv_tid, NULL, &start_srv, (void *) &sd);
-  //pthread_detach (srv_tid);
+  pthread_detach (srv_tid);
   
-  pthread_join (srv_tid, NULL);
-
+  // pthread_join (srv_tid, NULL);
   //start_srv ((void *) &sd);
 
-  //return fuse_main (argc, argv, &test_oper, NULL);
-  return 0;
+  return fuse_main (argc, argv, &waitfs_oper, NULL);
 }
 

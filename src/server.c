@@ -31,8 +31,6 @@ void * start_srv (void * arg)
 	exit(1);
       }
 
-      printf("New Connection.\n");
-
       pthread_create (&last_tid, NULL, &handle, (void *) &cli_sd);
       pthread_detach (last_tid);
       //handle ((void *) &cli_sd);
@@ -130,7 +128,6 @@ void * handle (void * arg)
       writeline (cli_sd, ERROR_CMD, strlen (ERROR_CMD), LF);
       goto done;      
     }  
-  printf ("calling session destroy\n");
   session_destroy (sid);
 
   return NULL;
