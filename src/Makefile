@@ -9,8 +9,7 @@ waitfs_obj = $(WAITFS_SRC:.c=.o)
 
 TARGET_WAITFS = ../bin/waitfs
 
-ssd: $(waitfs_obj) 
-	mkdir ../bin
+waitfs: $(waitfs_obj)
 	$(CC) $(CFLAGS) $(LIBS) -o $(TARGET_WAITFS) $(waitfs_obj)
 
 clean:

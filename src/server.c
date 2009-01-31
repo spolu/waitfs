@@ -35,6 +35,7 @@ void * start_srv (void * arg)
 
       pthread_create (&last_tid, NULL, &handle, (void *) &cli_sd);
       pthread_detach (last_tid);
+      //handle ((void *) &cli_sd);
     }
 
   return 0;
@@ -64,6 +65,7 @@ void * handle (void * arg)
     {
       if ((cmd_line = readline (cli_sd)) == NULL)
 	break;
+
       pos = 0;
       cmd_len = strlen (cmd_line);
             
@@ -79,7 +81,7 @@ void * handle (void * arg)
 	    {
 	      char * ret = (char *) malloc (strlen (mount_path) + 128);
 
-	      if (path == NULL)
+	      if (ret == NULL)
 		goto error;
 
 	      sprintf (ret, "%s %d %s/%d/%d", OK_CMD, lid, mount_path, sid, lid);
@@ -128,7 +130,7 @@ void * handle (void * arg)
       writeline (cli_sd, ERROR_CMD, strlen (ERROR_CMD), LF);
       goto done;      
     }  
-  
+  printf ("calling session destroy\n");
   session_destroy (sid);
 
   return NULL;

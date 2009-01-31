@@ -72,7 +72,7 @@ sid_t session_create (uid_t uid)
   session_t * new_s = NULL;
   sid_t ret_sid;
 
-  new_s = (session_t *) malloc (sizeof (new_s));
+  new_s = (session_t *) malloc (sizeof (session_t));
 
   if (new_s == NULL)
     return -1;

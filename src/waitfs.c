@@ -56,6 +56,8 @@ int main (int argc, char *argv[])
   
   pthread_join (srv_tid, NULL);
 
+  //start_srv ((void *) &sd);
+
   //return fuse_main (argc, argv, &test_oper, NULL);
   return 0;
 }
