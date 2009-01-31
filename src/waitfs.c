@@ -13,7 +13,7 @@
 #define FUSE_USE_VERSION 26
 #include <fuse.h>
 
-#define SOCK_PATH "/Users/spolu/waitfs"
+#define SOCK_PATH "/var/waitfs"
 
 #include "server.h"
 #include "session.h"

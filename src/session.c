@@ -301,7 +301,7 @@ ssize_t session_readlink (sid_t sid, lid_t lid, char *buf, size_t bufsize)
     return -1;
   }
 
-  memcpy (buf, link->path, strlen (link->path));
+  memcpy (buf, link->path, bufsize);
   ret_len = strlen (link->path);
   
   pthread_mutex_unlock (&link->mutex);
