@@ -296,7 +296,7 @@ ssize_t session_readlink (sid_t sid, lid_t lid, char *buf, size_t bufsize)
     return -1;
   }
 
-  if (strlen (link->path) > bufsize) {
+  if (strlen (link->path) >= bufsize) {
     pthread_mutex_unlock (&link->mutex);
     return -1;
   }
