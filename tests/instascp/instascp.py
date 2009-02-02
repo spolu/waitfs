@@ -52,7 +52,6 @@ def instascp(hostname, remote, local):
 				m[path] = rpath
 			finally:
 				mlock.release()
-			print c
 			c.getlinkfor(path)
 
 	do_dir(remote)

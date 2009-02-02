@@ -53,7 +53,7 @@ class connection(object):
 		lid, lpath = self.getlink()
 		self.paths[path] = (lid, lpath)
 		_debug('symlink %s %s' % (path, lpath))
-		os.symlink(path, lpath)
+		os.symlink(lpath, path)
 
 	#@synchronized
 	def getlink(self):
