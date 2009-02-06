@@ -7,6 +7,7 @@ SOCK_PATH = '/var/waitfs'
 OPEN_CMD = 'open'
 GETLINK_CMD = 'getlink'
 SETLINK_CMD = 'setlink'
+ACCESSED_CMD = 'accessed'
 OK_CMD = 'ok'
 ERROR_CMD = 'error'
 
@@ -15,22 +16,6 @@ DEBUG = True
 def _debug(s):
 	if DEBUG:
 		print 'DEBUG (%s): %s' % (__name__, repr(s))
-
-def synchronized(func):
-	def wrapper(self,*__args,**__kw):
-		try:
-			rlock = self._sync_lock
-		except AttributeError:
-			rlock = self.__dict__.setdefault('_sync_lock',RLock())
-			rlock.acquire()
-		try:
-			return func(self,*__args,**__kw)
-		finally:
-			rlock.release()
-		wrapper.__name__ = func.__name__
-		wrapper.__dict__ = func.__dict__
-		wrapper.__doc__ = func.__doc__
-		return wrapper
 
 class error(Exception):
 	pass
@@ -41,70 +26,121 @@ class unexpected_response(Exception):
 class connection(object):
 	def __init__(self):
 		self.paths = {}
-		self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-		self.sock.connect(SOCK_PATH)
+		self.notifications = [] # queue of handles
+		self._sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+		self._sock.connect(SOCK_PATH)
+		self._lock = RLock()
 
-	# TODO This seems to be broken, must fix or acquire locks manually
-	#@synchronized
+	def _recv(self, wait_for):
+		"""Blocking readline, reads "one" response from the server.
+		If the prefix of the message is not "wait_for" it will
+		dispatch the message as a callback and readline again until
+		the expected response header appears.  If something besides
+		a callback prefix or wait_for prefix appears it is an error."""
+		try:
+			self._lock.acquire()
+
+			response = self._sock.recv(1024)
+			_debug('Result: %s' % response)
+			if wait_for == None:
+				if not response.startswith(ACCESSED_CMD):
+					raise unexpected_response(repr(response))
+				fields = response.split()
+				handle = int(fields[1])
+				self.notifications.append(handle)
+			else:
+				if response.startswith(wait_for):
+					if response.startswith(ACCESSED_CMD):
+						fields = response.split()
+						handle = int(fields[2])
+						self.notifications.append(handle)
+					elif response.startswith(wait_for):
+						return response
+					else:
+						raise unexpected_response(repr(response))
+		finally:
+			self._lock.release()
+
+	def _send(self, request):
+		try:
+			self._lock.acquire()
+			
+			self._sock.send(request)
+		finally:
+			self._lock.release()
+
+
 	def getlinkfor(self, path):
 		"""Porcelain for getlink.  Caller passes in path they want
 		a waitfs link for.  The connection will track the association
 		from lid -> (path, linkpath) for the user."""
-		lid, lpath = self.getlink()
-		self.paths[path] = (lid, lpath)
-		_debug('symlink %s %s' % (path, lpath))
-		os.symlink(lpath, path)
+		try:
+			self._lock.acquire()
 
-	#@synchronized
+			lid, lpath = self.getlink()
+			self.paths[path] = (lid, lpath)
+			_debug('symlink %s %s' % (path, lpath))
+			os.symlink(lpath, path)
+		finally:
+			self._lock.release()
+
 	def getlink(self):
-		request = '%s\n' % GETLINK_CMD
-		_debug('Request: %s' % request)
-		self.sock.send(request)
+		try:
+			self._lock.acquire()
 
-		response = self.sock.recv(1024)
-		_debug('Result: %s' % response)
+			request = '%s\n' % GETLINK_CMD
+			_debug('Request: %s' % request)
+			self._send(request)
 
-		results = response.split()
-		if len(results) != 3:
-			raise unexpected_response(response)
-		if results[0] == ERROR_CMD:
-			raise error(results[0])
-		elif results[0] != OK_CMD:
-			raise unexpected_response(response)
+			response = self._recv(GETLINK_CMD)
 
-		lid, lpath = results[1:]
-		lid = int(lid)
+			results = response.split()
+			if len(results) != 4 or results[0] != GETLINK_CMD:
+				raise unexpected_response(response)
+			if results[1] == ERROR_CMD:
+				raise error(results)
+			elif results[1] != OK_CMD:
+				raise unexpected_response(response)
 
-		return lid, lpath
+			lid, lpath = results[2:]
+			lid = int(lid)
 
-	@synchronized
+			return lid, lpath
+		finally:
+			self._lock.release()
+
 	def setlinkfor(self, path, contentpath):
 		"""Atomically moves contentpath to path and notifies the waitfs
 		daemon by performing setlink on the appropriate (lid, path)"""
-		self._sync_lock.acquire()
-		lid, lpath = self.paths[path]
-		os.rename(contentpath, path)
-		self.setlink(lid, path)
-		del self.paths[path]
+		try:
+			self._lock.acquire()
 
-	@synchronized
+			self._sync_lock.acquire()
+			lid, lpath = self.paths[path]
+			os.rename(contentpath, path)
+			self.setlink(lid, path)
+			del self.paths[path]
+		finally:
+			self._lock.release()
+
 	def setlink(self, lid, path):
-		request = '%s %d %s' % (SETLINK_CMD, lid, path)
-		_debug('Request: %s' % request)
-		self.sock.send(request)
+		try:
+			self._lock.acquire()
+			request = '%s %d %s' % (SETLINK_CMD, lid, path)
+			_debug('Request: %s' % request)
+			self._send(request)
 
-		response = self.sock.recv(1024)
-		_debug('Result: %s' % response)
+			response = self._recv(SETLINK_CMD)
 
-		results = response.split()
-		if len(results) != 1:
-			raise unexpected_response(response)
-		if results[0] == ERROR_CMD:
-			raise error(results[0])
-		elif results[0] != OK_CMD:
-			raise unexpected_response(response)
-
-		return
+			results = response.split()
+			if len(results) != 2 or results[0] != SETLINK_CMD:
+				raise unexpected_response(response)
+			if results[1] == ERROR_CMD:
+				raise error(results)
+			elif results[1] != OK_CMD:
+				raise unexpected_response(response)
+		finally:
+			self._lock.release()
 
 	def start_callback_monitor(self, cb):
 		self.cb = cb
@@ -115,8 +151,23 @@ class connection(object):
 		while True:
 			time.sleep(.1)
 			try:
-				self._sync_lock.acquire()
+				self._lock.acquire()
+				self._recv(None) # causes _recv to just queue cbs
 			finally:
-				self._sync_lock.release()
+				self._lock.release()
+		
+	def popaccessed(self):
+		try:
+			self._lock.acquire()
+			if len(self.notificiations) == 0:
+				return None
+			else:
+				handle = self.notifications.pop()
+				# TODO need to lookup on lid to get path
+				path = ''
+				return lid, path
+
+		finally:
+			self._lock.release()
 		
 
