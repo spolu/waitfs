@@ -19,12 +19,25 @@
 #include "session.h"
 
 static pthread_t srv_tid;
-char *mount_path = "/mnt/waitfs";
+char *mount_path;
 
 extern struct fuse_operations waitfs_oper;
 
 int main (int argc, char *argv[])
 {  
+  struct fuse *fuse;
+  int multithreaded;
+  int res;
+
+  fuse = fuse_setup(argc, argv, &waitfs_oper, sizeof(waitfs_oper), &mount_path,
+			&multithreaded, NULL);
+  if (fuse == NULL)
+    return 1;
+  if (!multithreaded) {
+    perror ("fuse needs to be run multithreaded");
+    exit (1);
+  }
+
   int sd;
   socklen_t len;
   struct sockaddr_un sun_addr;
@@ -59,6 +72,12 @@ int main (int argc, char *argv[])
   // pthread_join (srv_tid, NULL);
   //start_srv ((void *) &sd);
 
-  return fuse_main (argc, argv, &waitfs_oper, NULL);
+  res = fuse_loop_mt(fuse);
+
+  fuse_teardown(fuse, mount_path);
+  if (res == -1)
+    return 1;
+
+  return 0;
 }
 
