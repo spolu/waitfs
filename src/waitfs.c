@@ -69,7 +69,7 @@ int main (int argc, char *argv[])
   pthread_create (&srv_tid, NULL, &start_srv, (void *) &sd);
   pthread_detach (srv_tid);
   
-  // pthread_join (srv_tid, NULL);
+  //pthread_join (srv_tid, NULL);
   //start_srv ((void *) &sd);
 
   res = fuse_loop_mt(fuse);

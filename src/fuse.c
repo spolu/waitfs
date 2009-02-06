@@ -28,6 +28,8 @@ static int waitfs_getattr(const char *path, struct stat *stbuf)
 
   char *token, *brkt, *path_copy = NULL;
 
+  printf ("waitfs_getattr %s\n", path);
+
   memset(stbuf, 0, sizeof(struct stat));
 
   if(strcmp(path, "/") == 0) {
@@ -92,6 +94,8 @@ static int waitfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
   (void) offset;
   (void) fi;
 
+  printf ("waitfs_readdir\n");
+
   path_copy = (char *) malloc (strlen (path) + 1);
   if (path_copy == NULL)
     goto error;
@@ -150,6 +154,8 @@ static int waitfs_readlink (const char *path, char * buf, size_t bufsize)
   lid_t lid = 0;
 
   char *token, *brkt, *path_copy = NULL;
+
+  printf ("waitfs_readlink\n");
 
   path_copy = (char *) malloc (strlen (path) + 1);
   if (path_copy == NULL)

@@ -57,7 +57,7 @@ void * handle (void * arg)
   /*
    * TODO : read the uid
    */
-  sid = session_create (0); 
+  sid = session_create (0, NULL, NULL);
   
   for (;;)
     {
