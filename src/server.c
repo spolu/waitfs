@@ -46,7 +46,7 @@ void * handle (void * arg)
   lid_t lid;
 
   char * cmd_line;
-  char *cmd_str, *uid_str, *lid_str;
+  char *cmd_str, *lid_str;
   char * path;
 
   off_t pos;
@@ -77,12 +77,14 @@ void * handle (void * arg)
 
 	  if (lid > 0) 
 	    {
-	      char * ret = (char *) malloc (strlen (mount_path) + 128);
+	      char * ret = (char *) malloc (strlen(GETLINK_CMD) +
+					    strlen (mount_path) + 128);
 
 	      if (ret == NULL)
 		goto error;
 
-	      sprintf (ret, "%s %d %s/%d/%d", OK_CMD, lid, mount_path, sid, lid);
+	      sprintf (ret, "%s %s %d %s/%d/%d",
+		 GETLINK_CMD, OK_CMD, lid, mount_path, sid, lid);
 	      writeline (cli_sd, ret, strlen (ret), LF);
 
 	      free (ret);
@@ -115,8 +117,17 @@ void * handle (void * arg)
 
 	  if (session_setlink (sid, lid, path) != 0)
 	    goto error;
-	  
-	  writeline (cli_sd, OK_CMD, strlen (OK_CMD), LF);
+
+	  char * ret = (char *) malloc (strlen(SETLINK_CMD) +
+					strlen (OK_CMD) + 2);
+
+	  if (ret == NULL)
+	    goto error;
+
+	  sprintf (ret, "%s %s", SETLINK_CMD, OK_CMD);
+	  writeline (cli_sd, ret, strlen (ret), LF);
+
+	  free (ret);
 	}
       
     done:
