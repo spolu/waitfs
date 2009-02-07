@@ -17,6 +17,13 @@ extern char *mount_path;
 
 static pthread_t last_tid;
 
+typedef struct sd
+{
+  int cli;
+  pthread_mutex_t mutex;
+
+} sd_t;
+
 void * start_srv (void * arg)
 {
   struct sockaddr_un remote;
@@ -40,29 +47,87 @@ void * start_srv (void * arg)
 }
 
 
+void * readlink_cb (void * arg)
+{
+  sid_t sid;
+  lid_t lid;
+  sd_t *sd;
+
+  if (arg == NULL)
+    return NULL;
+
+  sid = ((cb_arg_t *) arg)->sid;
+  lid = ((cb_arg_t *) arg)->lid;
+  sd = (sd_t *) ((cb_arg_t *) arg)->arg;
+
+  if (sd == NULL)
+    return NULL;
+
+  pthread_mutex_lock (&sd->mutex);
+  
+  char * ret = (char *) malloc (strlen(READLINK_CMD) +
+				strlen (mount_path) + 128);
+  
+  if (ret == NULL)
+    return NULL;
+  
+  sprintf (ret, "%s %d %s/%d/%d",
+	   READLINK_CMD, lid, mount_path, sid, lid);
+  writeline (sd->cli, ret, strlen (ret), LF);
+
+  free (ret);
+  
+  pthread_mutex_unlock (&sd->mutex);
+  
+  return NULL;
+}
+
+
+
 void * handle (void * arg)
 {
   sid_t sid;
   lid_t lid;
 
-  char * cmd_line;
+  char *cmd_line;
   char *cmd_str, *lid_str;
-  char * path;
+  char *path;
 
   off_t pos;
   size_t cmd_len;
+  
+  sd_t *sd = NULL;
+  cb_arg_t *cb_arg = NULL;
 
-  int cli_sd = *((int *) arg);
+
+  sd = (sd_t *) malloc (sizeof (sd_t));
+
+  if (sd == NULL)
+    return NULL;
+
+  sd->cli = *((int *) arg);
+  pthread_mutex_init (&sd->mutex, NULL);
+
+  cb_arg = (cb_arg_t *) malloc (sizeof (cb_arg_t));
+
+  if (cb_arg == NULL) {
+    free (sd);
+    return NULL;
+  }
+  
+  cb_arg->arg = (void *) sd;
 
   /*
    * TODO : read the uid
    */
-  sid = session_create (0); 
+  sid = session_create (0, &readlink_cb, cb_arg);
   
   for (;;)
     {
-      if ((cmd_line = readline (cli_sd)) == NULL)
+      if ((cmd_line = readline (sd->cli)) == NULL)
 	break;
+
+      pthread_mutex_lock (&sd->mutex);
 
       pos = 0;
       cmd_len = strlen (cmd_line);
@@ -85,7 +150,7 @@ void * handle (void * arg)
 
 	      sprintf (ret, "%s %s %d %s/%d/%d",
 		 GETLINK_CMD, OK_CMD, lid, mount_path, sid, lid);
-	      writeline (cli_sd, ret, strlen (ret), LF);
+	      writeline (sd->cli, ret, strlen (ret), LF);
 
 	      free (ret);
 	      goto done;
@@ -125,7 +190,7 @@ void * handle (void * arg)
 	    goto error;
 
 	  sprintf (ret, "%s %s", SETLINK_CMD, OK_CMD);
-	  writeline (cli_sd, ret, strlen (ret), LF);
+	  writeline (sd->cli, ret, strlen (ret), LF);
 
 	  free (ret);
 	}
@@ -133,13 +198,17 @@ void * handle (void * arg)
     done:
       if (cmd_line != NULL)
 	free (cmd_line);
+      pthread_mutex_unlock (&sd->mutex);
       continue;
 
     error:
-      writeline (cli_sd, ERROR_CMD, strlen (ERROR_CMD), LF);
+      writeline (sd->cli, ERROR_CMD, strlen (ERROR_CMD), LF);
       goto done;      
     }  
+
   session_destroy (sid);
+  free (cb_arg);
+  free (sd);
 
   return NULL;
 }

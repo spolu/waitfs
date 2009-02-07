@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <stdbool.h>
 
 #include <pthread.h>
 
@@ -41,8 +42,11 @@ typedef struct session
 
   lid_t last_lid;
 
-  struct list link_list;    // session links
+  void *(*readlink_cb)(void *);
+  cb_arg_t *arg;  
 
+  struct list link_list;    // session links
+  
   struct list_elem elem;
 
 } session_t;
@@ -64,7 +68,7 @@ int init_session ()
 }
 
 
-sid_t session_create (uid_t uid)
+sid_t session_create (uid_t uid, void *(*readlink_cb)(void *), cb_arg_t *arg)
 {
   session_t * new_s = NULL;
   sid_t ret_sid;
@@ -79,6 +83,9 @@ sid_t session_create (uid_t uid)
   new_s->last_lid = 0;
 
   list_init (&new_s->link_list);
+
+  new_s->readlink_cb = readlink_cb;
+  new_s->arg = arg;
   
   ret_sid = new_s->sid;
 
@@ -254,6 +261,14 @@ ssize_t session_readlink (sid_t sid, lid_t lid, char *buf, size_t bufsize)
   link_t * link = NULL;
   ssize_t ret_len;
 
+  bool cb_done = 0;
+  void *(*cb)(void *);
+  cb_arg_t *arg;
+
+ start:
+  session = NULL;
+  link = NULL;
+
   pthread_mutex_lock (&session_mutex);
 
   for (e = list_begin (&session_list); e != list_end (&session_list);
@@ -282,9 +297,29 @@ ssize_t session_readlink (sid_t sid, lid_t lid, char *buf, size_t bufsize)
     return -1;
   }
 
+  if (!cb_done) 
+    {
+      cb = session->readlink_cb;
+      arg = session->arg;
+      arg->lid = lid;
+      arg->sid = sid;
+
+      pthread_mutex_unlock (&session_mutex);
+      
+      if (cb != NULL) {
+	pthread_t id;
+	pthread_create (&id, NULL, cb, (void *) arg);
+	pthread_detach (id);
+      }
+      
+      cb_done = true;
+      
+      goto start;
+    }
+    
   pthread_mutex_lock (&link->mutex);
   pthread_mutex_unlock (&session_mutex);
-  
+
   if (link->path == NULL) {
     link->waiter_cnt ++;
     pthread_cond_wait (&link->cond_set, &link->mutex);
