@@ -25,7 +25,8 @@ class unexpected_response(Exception):
 
 class connection(object):
 	def __init__(self):
-		self.paths = {}
+		self.paths = {} 	# path -> (lid, lpath)
+		self.lids = {}		# lid -> (path, lpath)
 		self.notifications = [] # queue of handles
 		self._sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 		self._sock.connect(SOCK_PATH)
@@ -40,6 +41,7 @@ class connection(object):
 		try:
 			self._lock.acquire()
 
+			self._sock.setblocking(wait_for != None)
 			response = self._sock.recv(1024)
 			_debug('Result: %s' % response)
 			if wait_for == None:
@@ -79,6 +81,7 @@ class connection(object):
 
 			lid, lpath = self.getlink()
 			self.paths[path] = (lid, lpath)
+			self.lids[lid] = (path, lpath)
 			_debug('symlink %s %s' % (path, lpath))
 			os.symlink(lpath, path)
 		finally:
@@ -115,11 +118,12 @@ class connection(object):
 		try:
 			self._lock.acquire()
 
-			self._sync_lock.acquire()
+			self._lock.acquire()
 			lid, lpath = self.paths[path]
 			os.rename(contentpath, path)
 			self.setlink(lid, path)
 			del self.paths[path]
+			del self.lids[lid]
 		finally:
 			self._lock.release()
 
@@ -142,32 +146,39 @@ class connection(object):
 		finally:
 			self._lock.release()
 
-	def start_callback_monitor(self, cb):
-		self.cb = cb
-		l = lambda c: self._callback_monitor(cb)
-		self.monitor = Thread(target=l)
+	def start_monitor(self):
+		self.monitor = Thread(target=self._monitor)
+		self.monitor.start()
 
-	def _callback_monitor(self, cb):
+	def _monitor(self):
+		import time
+		c = 1
 		while True:
 			time.sleep(.1)
+			c += 1
+			_debug('_monitor iteration')
 			try:
 				self._lock.acquire()
+				_debug('_monitor iteration - locked')
+				if c % 10 != 0:
+					i = c / 10 + 1
+					self.notifications.append(i)
+					_debug('Faking access to: %d' % i)
 				self._recv(None) # causes _recv to just queue cbs
 			finally:
 				self._lock.release()
+				_debug('_monitor iteration - unlocked')
 		
 	def popaccessed(self):
 		try:
 			self._lock.acquire()
-			if len(self.notificiations) == 0:
+			if len(self.notifications) == 0:
 				return None
 			else:
-				handle = self.notifications.pop()
+				lid = self.notifications.pop()
 				# TODO need to lookup on lid to get path
-				path = ''
-				return lid, path
-
+				path, lpath = self.lids[lid]
+				return path
 		finally:
 			self._lock.release()
-		
 
