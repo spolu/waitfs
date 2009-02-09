@@ -7,7 +7,7 @@ SOCK_PATH = '/var/waitfs'
 OPEN_CMD = 'open'
 GETLINK_CMD = 'getlink'
 SETLINK_CMD = 'setlink'
-ACCESSED_CMD = 'accessed'
+READLINK_CMD = 'readlink'
 OK_CMD = 'ok'
 ERROR_CMD = 'error'
 
@@ -17,7 +17,7 @@ def _debug(s):
 	if DEBUG:
 		print 'DEBUG (%s): %s' % (__name__, repr(s))
 
-class error(Exception):
+class failed_response(Exception):
 	pass
 
 class unexpected_response(Exception):
@@ -42,20 +42,27 @@ class connection(object):
 			self._lock.acquire()
 
 			self._sock.setblocking(wait_for != None)
-			response = self._sock.recv(1024)
+			try:
+				response = self._sock.recv(1024)
+			except socket.error, e:
+				#if wait_for != None:
+				#	raise e
+				return None
 			_debug('Result: %s' % response)
 			if wait_for == None:
-				if not response.startswith(ACCESSED_CMD):
+				if not response.startswith(READLINK_CMD):
 					raise unexpected_response(repr(response))
 				fields = response.split()
 				handle = int(fields[1])
+				_debug('callback on %d' % handle)
 				self.notifications.append(handle)
 			else:
 				if response.startswith(wait_for):
-					if response.startswith(ACCESSED_CMD):
+					if response.startswith(READLINK_CMD):
 						fields = response.split()
 						handle = int(fields[2])
 						self.notifications.append(handle)
+						_debug('callback on %d' % handle)
 					elif response.startswith(wait_for):
 						return response
 					else:
@@ -101,7 +108,7 @@ class connection(object):
 			if len(results) != 4 or results[0] != GETLINK_CMD:
 				raise unexpected_response(response)
 			if results[1] == ERROR_CMD:
-				raise error(results)
+				raise failed_response(results)
 			elif results[1] != OK_CMD:
 				raise unexpected_response(response)
 
@@ -140,7 +147,7 @@ class connection(object):
 			if len(results) != 2 or results[0] != SETLINK_CMD:
 				raise unexpected_response(response)
 			if results[1] == ERROR_CMD:
-				raise error(results)
+				raise failed_response(results)
 			elif results[1] != OK_CMD:
 				raise unexpected_response(response)
 		finally:
@@ -152,22 +159,17 @@ class connection(object):
 
 	def _monitor(self):
 		import time
-		c = 1
+		c = 0
 		while True:
-			time.sleep(.1)
 			c += 1
-			_debug('_monitor iteration')
+			time.sleep(.1)
+			if not (c % 10):
+				_debug('_monitor iteration')
 			try:
 				self._lock.acquire()
-				_debug('_monitor iteration - locked')
-				if c % 10 != 0:
-					i = c / 10 + 1
-					self.notifications.append(i)
-					_debug('Faking access to: %d' % i)
 				self._recv(None) # causes _recv to just queue cbs
 			finally:
 				self._lock.release()
-				_debug('_monitor iteration - unlocked')
 		
 	def popaccessed(self):
 		try:
