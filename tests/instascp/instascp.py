@@ -91,14 +91,7 @@ def instascp(hostname, remote, local):
 	# get the top level directory listing
 	do_dir(local, remote)
 
-	c.start_monitor()
-	# TODO Having c.monitor spawn threads instead?  This works.
-	import time
-	while True:
-		apath = c.popaccessed()
-		if apath:
-			local_accessed(apath)
-		time.sleep(.1)
+	c.monitor()
 
 
 def usage():

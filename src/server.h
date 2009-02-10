@@ -8,6 +8,8 @@
 #define OK_CMD "ok"
 #define ERROR_CMD "error"
 
+#define USERDATA_MAX 10		// maximum size of extra user data
+
 void * start_srv (void * arg);
 void * handle (void * arg);
 

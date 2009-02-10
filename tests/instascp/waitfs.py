@@ -32,43 +32,13 @@ class connection(object):
 		self._sock.connect(SOCK_PATH)
 		self._lock = RLock()
 
-	def _recv(self, wait_for):
-		"""Blocking readline, reads "one" response from the server.
-		If the prefix of the message is not "wait_for" it will
-		dispatch the message as a callback and readline again until
-		the expected response header appears.  If something besides
-		a callback prefix or wait_for prefix appears it is an error."""
-		try:
-			self._lock.acquire()
+		self._serialno = 0
+		self.cbs = {}
 
-			self._sock.setblocking(wait_for != None)
-			try:
-				response = self._sock.recv(1024)
-			except socket.error, e:
-				#if wait_for != None:
-				#	raise e
-				return None
-			_debug('Result: %s' % response)
-			if wait_for == None:
-				if not response.startswith(READLINK_CMD):
-					raise unexpected_response(repr(response))
-				fields = response.split()
-				handle = int(fields[1])
-				_debug('callback on %d' % handle)
-				self.notifications.append(handle)
-			else:
-				if response.startswith(wait_for):
-					if response.startswith(READLINK_CMD):
-						fields = response.split()
-						handle = int(fields[2])
-						self.notifications.append(handle)
-						_debug('callback on %d' % handle)
-					elif response.startswith(wait_for):
-						return response
-					else:
-						raise unexpected_response(repr(response))
-		finally:
-			self._lock.release()
+	def _nextserial(self):
+		# TODO must have lock, all calls already do, though
+		self._serialno += 1
+		return self._serialno
 
 	def _send(self, request):
 		try:
@@ -83,81 +53,114 @@ class connection(object):
 		"""Porcelain for getlink.  Caller passes in path they want
 		a waitfs link for.  The connection will track the association
 		from lid -> (path, linkpath) for the user."""
+		def getlinkforcb(self, lid, lpath):
+			try:
+				self._lock.acquire()
+				self.paths[path] = (lid, lpath)
+				self.lids[lid] = (path, lpath)
+				_debug('symlink %s %s' % (path, lpath))
+				os.symlink(lpath, path)
+			finally:
+				self._lock.release()
+		self.getlink(getlinkforcb)
+
+	def getlink(self, cb):
 		try:
 			self._lock.acquire()
 
-			lid, lpath = self.getlink()
-			self.paths[path] = (lid, lpath)
-			self.lids[lid] = (path, lpath)
-			_debug('symlink %s %s' % (path, lpath))
-			os.symlink(lpath, path)
-		finally:
-			self._lock.release()
-
-	def getlink(self):
-		try:
-			self._lock.acquire()
-
-			request = '%s\n' % GETLINK_CMD
+			# TODO this needs to have a unique id instead
+			serialno = self._nextserial()
+			self.cbs[serialno] = cb
+			request = '%s %d\n' % (GETLINK_CMD, serialno)
 			_debug('Request: %s' % request)
 			self._send(request)
-
-			response = self._recv(GETLINK_CMD)
-
-			results = response.split()
-			if len(results) != 4 or results[0] != GETLINK_CMD:
-				raise unexpected_response(response)
-			if results[1] == ERROR_CMD:
-				raise failed_response(results)
-			elif results[1] != OK_CMD:
-				raise unexpected_response(response)
-
-			lid, lpath = results[2:]
-			lid = int(lid)
-
-			return lid, lpath
 		finally:
 			self._lock.release()
+
+	def _handle_getlink_response(self, response):
+		results = response.split()
+		if len(results) != 5 or results[0] != GETLINK_CMD:
+			print repr(results)
+			raise unexpected_response(response)
+		if results[2] == ERROR_CMD:
+			raise failed_response(results)
+		elif results[2] != OK_CMD:
+			raise unexpected_response(response)
+
+		serialno = int(results[1])
+
+		lid, lpath = results[3:]
+		lid = int(lid)
+
+		try:
+			self._lock.acquire()
+			cb = self.cbs[serialno]
+			del self.cbs[serialno]
+		finally:
+			self._lock.release()
+
+		cb(self, lid, lpath)
 
 	def setlinkfor(self, path, contentpath):
 		"""Atomically moves contentpath to path and notifies the waitfs
 		daemon by performing setlink on the appropriate (lid, path)"""
-		try:
-			self._lock.acquire()
+		def setlinkforcb(self, lid, path):
+			try:
+				self._lock.acquire()
+				del self.paths[path]
+				del self.lids[lid]
+			finally:
+				self._lock.release()
 
+		try:
 			self._lock.acquire()
 			lid, lpath = self.paths[path]
 			os.rename(contentpath, path)
-			self.setlink(lid, path)
-			del self.paths[path]
-			del self.lids[lid]
 		finally:
 			self._lock.release()
 
-	def setlink(self, lid, path):
+		cb = lambda response: self.setlinkforcb(lid, path, response)
+		self.setlink(lid, path, cb)
+
+	def setlink(self, lid, path, cb):
 		try:
 			self._lock.acquire()
-			request = '%s %d %s' % (SETLINK_CMD, lid, path)
+			serialno = self._nextserial()
+			self.cbs[serialno] = cbs
+			request = '%s %d %d %s' % (SETLINK_CMD,
+										 serialno,
+										 lid, path)
 			_debug('Request: %s' % request)
 			self._send(request)
-
-			response = self._recv(SETLINK_CMD)
-
-			results = response.split()
-			if len(results) != 2 or results[0] != SETLINK_CMD:
-				raise unexpected_response(response)
-			if results[1] == ERROR_CMD:
-				raise failed_response(results)
-			elif results[1] != OK_CMD:
-				raise unexpected_response(response)
 		finally:
 			self._lock.release()
 
-	def start_monitor(self):
-		self.monitor = Thread(target=self._monitor)
-		self.monitor.start()
+	def _handle_setlink_response(self, lid, path, response):
+		results = response.split()
+		if len(results) != 3 or results[0] != SETLINK_CMD:
+			raise unexpected_response(response)
+		if results[2] == ERROR_CMD:
+			raise failed_response(results)
+		elif results[2] != OK_CMD:
+			raise unexpected_response(response)
 
-	def _monitor(self):
+		serialno = int(results[1])
+		try:
+			self._lock.acquire()
+			cb = self.cbs[serialno]
+			del self.cbs[serialno]
+		finally:
+			self._lock.release()
+
+		cb(self, lid, lpath)
+
+	def _handle_readlink_response(self, response):
+		print 'Need to handle lid: %d' % response
+
+	def monitor(self):
+		dispatch = { GETLINK_CMD: self._handle_getlink_response,
+					 SETLINK_CMD: self._handle_setlink_response,
+					 READLINK_CMD: self._handle_readlink_response }
 		import time
 		c = 0
 		while True:
@@ -167,7 +170,13 @@ class connection(object):
 				_debug('_monitor iteration')
 			try:
 				self._lock.acquire()
-				self._recv(None) # causes _recv to just queue cbs
+				# read length of incoming data first
+				l = int(self._sock.recv(4))
+				_debug('Incoming data length: %d' % l)
+				response = self._sock.recv(l)
+				hdr = response.split()[0]
+				_debug('Dispatching to %s from %s' % (hdr, response))
+				dispatch[hdr](response)
 			finally:
 				self._lock.release()
 		

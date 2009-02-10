@@ -115,7 +115,13 @@ size_t
 writeline (int fd, const char *ptr, size_t n, char * ret)
 {
 	size_t r = 0;
+	size_t retlen;
+	char lenbuf[5];
+	retlen = strlen(ptr);
+	if (retlen >= 10000)
+		perror ("return string too long");
+	snprintf (lenbuf, 5, "%.4zd", retlen);
+	r += writen (fd, lenbuf, 4);
 	r += writen (fd, ptr, n);
-	r += writen (fd, ret, strlen (ret));
 	return r;
 }

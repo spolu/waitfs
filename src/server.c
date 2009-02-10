@@ -95,6 +95,8 @@ void * handle (void * arg)
 
   off_t pos;
   size_t cmd_len;
+
+  char userdata[USERDATA_MAX + 1];
   
   sd_t *sd = NULL;
   cb_arg_t *cb_arg = NULL;
@@ -136,6 +138,13 @@ void * handle (void * arg)
       cmd_line[pos] = 0;
       cmd_str = cmd_line;
       
+      int i;
+      for (i = pos; cmd_line[i] != ' ' && i < cmd_len; i++);
+      cmd_line[i] = 0;
+
+      strncpy(userdata, cmd_line + pos + 1, USERDATA_MAX);
+      userdata[USERDATA_MAX] = '\0';
+
       if (strcmp (cmd_str, GETLINK_CMD) == 0) 
 	{
 	  lid = session_getlink (sid);
@@ -148,8 +157,8 @@ void * handle (void * arg)
 	      if (ret == NULL)
 		goto error;
 
-	      sprintf (ret, "%s %s %d %s/%d/%d",
-		 GETLINK_CMD, OK_CMD, lid, mount_path, sid, lid);
+	      sprintf (ret, "%s %s %s %d %s/%d/%d",
+		 GETLINK_CMD, userdata, OK_CMD, lid, mount_path, sid, lid);
 	      writeline (sd->cli, ret, strlen (ret), LF);
 
 	      free (ret);
@@ -189,7 +198,7 @@ void * handle (void * arg)
 	  if (ret == NULL)
 	    goto error;
 
-	  sprintf (ret, "%s %s", SETLINK_CMD, OK_CMD);
+	  sprintf (ret, "%s %s %s", SETLINK_CMD, userdata, OK_CMD);
 	  writeline (sd->cli, ret, strlen (ret), LF);
 
 	  free (ret);
