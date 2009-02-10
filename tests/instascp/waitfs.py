@@ -126,7 +126,7 @@ class connection(object):
 		try:
 			self._lock.acquire()
 			serialno = self._nextserial()
-			self.cbs[serialno] = cbs
+			self.cbs[serialno] = cb
 			request = '%s %d %d %s' % (SETLINK_CMD,
 										 serialno,
 										 lid, path)
@@ -154,13 +154,33 @@ class connection(object):
 
 		cb(self, lid, lpath)
 
-	def _handle_readlink_response(self, response):
-		print 'Need to handle lid: %d' % response
+	def _handle_readlink_response(self, response, readlink_cb):
+		_debug('Handling readlink: %s' % response)
+		results = response.split()
+		if len(results) != 3 or results[0] != READLINK_CMD:
+			raise unexpected_response(response)
 
-	def monitor(self):
+		lid, lpath = results[1:]
+		lid = int(lid)
+
+		try:
+			self._lock.acquire()
+			path, lpath2 = self.lids[lid]
+			assert(lpath == lpath2)
+		finally:
+			self._lock.release()
+
+		readlink_cb(path)
+
+	def monitor(self, readlink_cb):
+		"""Dispatch incoming data from waitfs, readlinks will be handled by the
+		callable specified as readlink_cb, gets local path that was 'accessed'
+		back as an argument"""
+		rlcb = lambda response: self._handle_readlink_response(response,
+															   readlink_cb)
 		dispatch = { GETLINK_CMD: self._handle_getlink_response,
 					 SETLINK_CMD: self._handle_setlink_response,
-					 READLINK_CMD: self._handle_readlink_response }
+					 READLINK_CMD: rlcb }
 		import time
 		c = 0
 		while True:

@@ -53,7 +53,7 @@ def instascp(hostname, remote, local):
 	# we're going to have to stat remotes to decide what they
 	# are or fetch that info when we listdir
 
-	def local_accessed(path):
+	def handle_readlink(path):
 		try:
 			mlock.acquire()
 			rpath = m[path]
@@ -91,7 +91,7 @@ def instascp(hostname, remote, local):
 	# get the top level directory listing
 	do_dir(local, remote)
 
-	c.monitor()
+	c.monitor(handle_readlink)
 
 
 def usage():
