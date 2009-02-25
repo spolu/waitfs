@@ -44,6 +44,7 @@ class connection(object):
 		try:
 			self._lock.acquire()
 			
+			_debug('send: %s' % request)
 			self._sock.send(request)
 		finally:
 			self._lock.release()
