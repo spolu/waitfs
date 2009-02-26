@@ -85,7 +85,7 @@ int init_session ()
 }
 
 
-sid_t session_create (uid_t uid, void *(*readlink_cb)(void *), cb_arg_t *arg)
+sid_t session_create (void *(*readlink_cb)(void *), cb_arg_t *arg)
 {
   session_t * new_s = NULL;
   sid_t ret_sid;
@@ -96,7 +96,7 @@ sid_t session_create (uid_t uid, void *(*readlink_cb)(void *), cb_arg_t *arg)
     return -1;
 
   new_s->sid = ++last_sid;
-  new_s->uid = uid;
+  new_s->uid = -1;
   new_s->last_lid = 0;
 
   list_init (&new_s->link_list);
@@ -111,6 +111,62 @@ sid_t session_create (uid_t uid, void *(*readlink_cb)(void *), cb_arg_t *arg)
   pthread_mutex_unlock (&session_mutex);
 
   return ret_sid;
+}
+
+int session_setuid (sid_t sid, uid_t uid)
+{
+  struct list_elem *e;
+  session_t * session = NULL;
+
+  pthread_mutex_lock (&session_mutex);
+
+  for (e = list_begin (&session_list); e != list_end (&session_list);
+       e = list_next (e))
+    {
+      session_t *s = list_entry (e, session_t, elem);
+      if (s->sid == sid)
+	  session = s;
+    }
+
+  if (session == NULL) {
+    pthread_mutex_unlock (&session_mutex);
+    return -1;
+  }
+
+  session->uid = uid;
+
+  pthread_mutex_unlock (&session_mutex);
+  
+  return 0;
+}
+
+
+uid_t session_getuid (sid_t sid)
+{
+  struct list_elem *e;
+  session_t * session = NULL;
+  uid_t ret_uid;
+
+  pthread_mutex_lock (&session_mutex);
+
+  for (e = list_begin (&session_list); e != list_end (&session_list);
+       e = list_next (e))
+    {
+      session_t *s = list_entry (e, session_t, elem);
+      if (s->sid == sid)
+	  session = s;
+    }
+
+  if (session == NULL) {
+    pthread_mutex_unlock (&session_mutex);
+    return -1;
+  }
+
+  ret_uid = session->uid;
+
+  pthread_mutex_unlock (&session_mutex);
+  
+  return ret_uid;
 }
 
 
