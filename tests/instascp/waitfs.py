@@ -121,7 +121,7 @@ class connection(object):
 		finally:
 			self._lock.release()
 
-		cb = lambda response: self.setlinkforcb(lid, path, response)
+		cb = lambda: setlinkforcb(self, lid, path)
 		self.setlink(lid, path, cb)
 
 	def setlink(self, lid, path, cb):
@@ -137,7 +137,7 @@ class connection(object):
 		finally:
 			self._lock.release()
 
-	def _handle_setlink_response(self, lid, path, response):
+	def _handle_setlink_response(self, response):
 		results = response.split()
 		if len(results) != 3 or results[0] != SETLINK_CMD:
 			raise unexpected_response(response)
@@ -154,7 +154,7 @@ class connection(object):
 		finally:
 			self._lock.release()
 
-		cb(self, lid, lpath)
+		cb()
 
 	def _handle_readlink_response(self, response, readlink_cb):
 		_debug('Handling readlink: %s' % response)
@@ -174,6 +174,14 @@ class connection(object):
 
 		readlink_cb(path)
 
+	def _handle_error_response(self, response):
+		try:
+			i = response.find(' ')
+			msg = response[i + 1:]
+		except ValueError:
+			msg = 'Unknown, no reason specified by the server'
+		raise failed_response(msg)
+
 	def monitor(self, readlink_cb):
 		"""Dispatch incoming data from waitfs, readlinks will be handled by the
 		callable specified as readlink_cb, gets local path that was 'accessed'
@@ -182,7 +190,8 @@ class connection(object):
 															   readlink_cb)
 		dispatch = { GETLINK_CMD: self._handle_getlink_response,
 					 SETLINK_CMD: self._handle_setlink_response,
-					 READLINK_CMD: rlcb }
+					 READLINK_CMD: rlcb,
+					 ERROR_CMD: self._handle_error_response }
 		import time
 		c = 0
 		while True:

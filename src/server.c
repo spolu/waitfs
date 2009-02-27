@@ -115,6 +115,10 @@ void * handle (void * arg)
   size_t cmd_len;
 
   char userdata[USERDATA_MAX + 1];
+
+  char *errstr;
+
+  errstr = NULL;
   
   sd_t *sd = NULL;
   cb_arg_t *cb_arg = NULL;
@@ -159,6 +163,7 @@ void * handle (void * arg)
 
       strncpy(userdata, cmd_line + pos + 1, USERDATA_MAX);
       userdata[USERDATA_MAX] = '\0';
+      pos += strlen(userdata) + 1;
 
       if (strcmp (cmd_str, GETLINK_CMD) == 0) 
 	{
@@ -204,8 +209,14 @@ void * handle (void * arg)
 	   * TODO: sanitize path
 	   */ 
 
-	  if (session_setlink (sid, lid, path) != 0)
-	    goto error;
+	  int rv;
+	  rv = session_setlink (sid, lid, path);
+	  if (rv != 0)
+	    {
+	      errstr = session_err_strs[rv];
+	      printf ("%s\n", errstr);
+	      goto error;
+	    }
 
 	  char * ret = (char *) malloc (strlen(SETLINK_CMD) +
 					strlen (OK_CMD) + 2);
@@ -253,7 +264,11 @@ void * handle (void * arg)
       continue;
 
     error:
-      writeline (sd->cli, ERROR_CMD, strlen (ERROR_CMD), LF);
+      if (!errstr)
+	errstr = "";
+      char errbuf[1024];
+      snprintf(errbuf, 1024, "%s %s", ERROR_CMD, errstr);
+      writeline (sd->cli, errbuf, strlen (errbuf), LF);
       goto done;      
     }  
 

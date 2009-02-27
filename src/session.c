@@ -28,6 +28,14 @@
 #include "list.h"
 #include "debug.h"
 
+char *session_err_strs[] = {
+	"OK",
+	"Session not found",
+	"Link not found",
+	"setlink already called for this link",
+	"Malloc failed"
+};
+
 /*
  * Link Data Structure
  */ 
@@ -286,7 +294,7 @@ int session_setlink (sid_t sid, lid_t lid, const char * path)
 
   if (session == NULL) {
     pthread_mutex_unlock (&session_mutex);
-    return -1;
+    return SES_SID_NOT_FOUND;
   }
   
   for (e = list_begin (&session->link_list); e != list_end (&session->link_list);
@@ -299,7 +307,7 @@ int session_setlink (sid_t sid, lid_t lid, const char * path)
 
   if (link == NULL) {
     pthread_mutex_unlock (&session_mutex);
-    return -1;
+    return SES_LID_NOT_FOUND;
   }
 
   pthread_mutex_lock (&link->mutex);
@@ -307,14 +315,14 @@ int session_setlink (sid_t sid, lid_t lid, const char * path)
 
   if (link->path != NULL) {
     pthread_mutex_unlock (&link->mutex);
-    return -1;
+    return SES_LINK_PATH_SET; 
   }
   
   link->path = (char *) malloc (strlen (path) + 1);
 
   if (link->path == NULL) {
     pthread_mutex_unlock (&link->mutex);
-    return -1;
+    return SES_MALLOC;
   }
   
   memset (link->path, 0, strlen (path) + 1);

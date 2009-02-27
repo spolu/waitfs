@@ -48,4 +48,13 @@ ssize_t session_readlink (sid_t sid, lid_t lid, char *buf, size_t bufsize);
 sid_t * list_sessions ();
 lid_t * list_links (sid_t sid);
 
+enum {
+    SES_OK = 0,
+    SES_SID_NOT_FOUND,
+    SES_LID_NOT_FOUND,
+    SES_LINK_PATH_SET,
+    SES_MALLOC
+};
+extern char *session_err_strs[];
+
 #endif
