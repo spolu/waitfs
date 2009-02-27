@@ -105,9 +105,10 @@ void * handle (void * arg)
 {
   sid_t sid;
   lid_t lid;
+  uid_t uid;
 
   char *cmd_line;
-  char *cmd_str, *lid_str;
+  char *cmd_str, *lid_str, *uid_str;
   char *path;
 
   off_t pos;
@@ -136,10 +137,7 @@ void * handle (void * arg)
   
   cb_arg->arg = (void *) sd;
 
-  /*
-   * TODO : read the uid
-   */
-  sid = session_create (0, &readlink_cb, cb_arg);
+  sid = session_create (&readlink_cb, cb_arg);
   
   for (;;)
     {
@@ -219,6 +217,33 @@ void * handle (void * arg)
 	  writeline (sd->cli, ret, strlen (ret), LF);
 
 	  free (ret);
+	}
+
+      else if (strcmp (cmd_str, SETUID_CMD) == 0) 
+	{
+	  if (pos + 1 >= cmd_len)
+	    goto error;
+
+	  uid_str = cmd_line + (pos + 1);
+
+	  for (;cmd_line[pos] != ' ' && pos < cmd_len; pos ++);
+	  cmd_line[pos] = 0; 
+
+	  uid = atoi (uid_str);
+	  
+	  if (session_setuid (sid, uid) != 0)
+	    goto error;
+
+	  char * ret = (char *) malloc (strlen(SETUID_CMD) +
+					strlen (OK_CMD) + 2);
+
+	  if (ret == NULL)
+	    goto error;
+
+	  sprintf (ret, "%s %s %s", SETUID_CMD, userdata, OK_CMD);
+	  writeline (sd->cli, ret, strlen (ret), LF);
+
+	  free (ret);	  
 	}
       
     done:

@@ -77,17 +77,23 @@ static int waitfs_getattr(const char *path, struct stat *stbuf)
   if (sid == 0) {
     goto error;
   }
-  else if (lid == 0) {
-    /*
-     * TODO : set uid
-     */
-    stbuf->st_mode = S_IFDIR | 0755;
-    stbuf->st_nlink = 1;
-  }
-  else {
-    stbuf->st_mode = S_IFLNK | 0755;
-    stbuf->st_nlink = 1;
-  }
+  else if (lid == 0) 
+    {
+      uid_t uid = session_getuid (sid);
+      if (uid != -1) {
+	stbuf->st_uid = uid;
+	stbuf->st_mode = S_IFDIR | 0700;
+      }
+      else {
+	stbuf->st_mode = S_IFDIR | 0755;
+      }
+      stbuf->st_nlink = 1;
+    }
+  else 
+    {
+      stbuf->st_mode = S_IFLNK | 0755;
+      stbuf->st_nlink = 1;
+    }
 
   return 0;
 
