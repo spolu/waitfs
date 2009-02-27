@@ -101,8 +101,8 @@ readline (int fd)
 	while (pos < LEN_HDR_LEN) {
 		nread = readn (fd, &lenhdr[pos], 1);
 		if (nread != 1) {
-			return NULL;
 			_debug("Bad readn in waiting for len hdr");
+			return NULL;
 		}
 		pos++;
 	}
