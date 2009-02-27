@@ -24,6 +24,14 @@
 
 #include "io.h"
 
+//#define DEBUG 1
+#ifdef DEBUG
+#define _debug(s...) do { printf("%s:%d ", __FILE__, __LINE__); \
+			  printf(s); \
+			  printf("\n"); } while (0)
+#else
+#define _debug(s...) do {} while (0)
+#endif
 
 size_t
 readn (int fd, void *vptr, size_t n)
@@ -83,23 +91,30 @@ readline (int fd)
 {
 	char *line;
 	char lenhdr[LEN_HDR_LEN + 1];
+	size_t pos;
 	size_t nread;
 	long len;
 	
-	printf ("Waiting for incoming message header\n");
-	nread = readn (fd, &lenhdr[0], LEN_HDR_LEN);
-	if (nread != LEN_HDR_LEN)
-	    {
-		printf ("Bad message header length %d\n", nread);
-		return NULL;
-	    }
+	_debug("Waiting for incoming message header");
+	nread = 0;
+	pos = 0;
+	while (pos < LEN_HDR_LEN) {
+		nread = readn (fd, &lenhdr[pos], 1);
+		if (nread != 1) {
+			return NULL;
+			_debug("Bad readn in waiting for len hdr");
+		}
+		pos++;
+	}
 	lenhdr[LEN_HDR_LEN] = '\0';
+	_debug("Read message header, following message is %s bytes", lenhdr);
 	
-	len = strtol (lenhdr, NULL, 10);
-	if (!errno)
+	errno = 0;
+	len = strtol (&lenhdr[0], NULL, 10);
+	if (errno) {
+		_debug("God hates ponies");
 		return NULL;
-	
-	printf ("Read message header, following message is %ld bytes\n", len);
+	}
 	
 	if ((line = (char *) malloc ((len + 1) * sizeof (char))) == NULL)
 		return NULL;
