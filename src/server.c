@@ -238,3 +238,5 @@ void * handle (void * arg)
 
   return NULL;
 }
+
+/* vim: set ts=8 sw=2: */

@@ -76,56 +76,39 @@ writen (int fd, const void *vptr, size_t n)
 	return n;
 }
 
+const size_t LEN_HDR_LEN = 4;
 
 char *
 readline (int fd)
 {
-	char * line;
-	char * ptr;
-	int i = 0;
-	int nread = 0;
-	int len = 0;
-	int buflen = 0;
+	char *line;
+	char lenhdr[LEN_HDR_LEN + 1];
+	size_t nread;
+	long len;
 	
-	
-	if ((line = (char *) malloc (LINE_BUF_SIZE * sizeof (char))) == NULL)
+	printf ("Waiting for incoming message header\n");
+	nread = readn (fd, &lenhdr[0], LEN_HDR_LEN);
+	if (nread != LEN_HDR_LEN)
+	    {
+		printf ("Bad message header length %d\n", nread);
 		return NULL;
-	ptr = line;
+	    }
+	lenhdr[LEN_HDR_LEN] = '\0';
 	
-	/* we accept \r\n and \n as endline. */
-	
-	while (len < (MAX_LINE_BUF_SIZE-1) && (nread = readn (fd, ptr, 1)) == 1
-		   && *ptr != '\n') {
-		
-		if (*ptr != '\r') {
-			len += nread;
-			ptr += nread;
-			buflen += nread;
-			
-			if (buflen == LINE_BUF_SIZE) {
-				i ++;
-				if ((line = realloc (line, (i+1) * LINE_BUF_SIZE * sizeof (char))) == NULL) {
-					free (line);
-					return NULL;
-				}
-				ptr = line + i * LINE_BUF_SIZE;
-				buflen = 0;
-			}
-		}
-	}
-	
-	/* EOF */
-	if (len == 0 && nread == 0) {
-		free (line);
+	len = strtol (lenhdr, NULL, 10);
+	if (!errno)
 		return NULL;
-	}
 	
-	if (nread == -1 || len >= MAX_LINE_BUF_SIZE) {
-		free (line);
+	printf ("Read message header, following message is %ld bytes\n", len);
+	
+	if ((line = (char *) malloc ((len + 1) * sizeof (char))) == NULL)
 		return NULL;
-	}
-		
-	line [len] = 0;
+	
+	nread = readn (fd, &line[0], len);
+	if (nread != len)
+		return NULL;
+	line[len] = 0;
+
 	return line;
 }
 
@@ -134,12 +117,14 @@ writeline (int fd, const char *ptr, size_t n, char * ret)
 {
 	size_t r = 0;
 	size_t retlen;
-	char lenbuf[5];
+	char lenbuf[LEN_HDR_LEN + 1];
 	retlen = strlen(ptr);
 	if (retlen >= 10000)
 		perror ("return string too long");
-	snprintf (lenbuf, 5, "%.4zd", retlen);
-	r += writen (fd, lenbuf, 4);
+	snprintf (lenbuf, LEN_HDR_LEN + 1, "%.4zd", retlen);
+	r += writen (fd, lenbuf, LEN_HDR_LEN);
 	r += writen (fd, ptr, n);
 	return r;
 }
+
+/* vim: set ts=8 sw=8 noexpandtab: */

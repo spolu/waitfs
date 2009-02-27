@@ -44,7 +44,9 @@ class connection(object):
 		try:
 			self._lock.acquire()
 			
-			self._sock.send(request)
+			msg = '%.4d%s' % (len(request), request)
+			_debug('send: %s' % msg)
+			self._sock.send(msg)
 		finally:
 			self._lock.release()
 
@@ -71,7 +73,7 @@ class connection(object):
 			# TODO this needs to have a unique id instead
 			serialno = self._nextserial()
 			self.cbs[serialno] = cb
-			request = '%s %d\n' % (GETLINK_CMD, serialno)
+			request = '%s %d' % (GETLINK_CMD, serialno)
 			_debug('Request: %s' % request)
 			self._send(request)
 		finally:

@@ -451,3 +451,5 @@ lid_t * list_links (sid_t sid)
   
   return ret;
 }
+
+/* vim: set ts=8 sw=2: */
