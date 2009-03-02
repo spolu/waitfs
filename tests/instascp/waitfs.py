@@ -1,5 +1,5 @@
 import socket
-from threading import Thread, RLock
+from threading import Thread, RLock, Condition
 import os
 
 SOCK_PATH = '/var/waitfs'
@@ -14,213 +14,246 @@ ERROR_CMD = 'error'
 DEBUG = True
 
 def _debug(s):
-	if DEBUG:
-		print 'DEBUG (%s): %s' % (__name__, repr(s))
+    if DEBUG:
+        print 'DEBUG (%s): %s' % (__name__, repr(s))
 
 class failed_response(Exception):
-	pass
+    pass
 
 class unexpected_response(Exception):
-	pass
+    pass
 
 class connection(object):
-	def __init__(self):
-		self.paths = {} 	# path -> (lid, lpath)
-		self.lids = {}		# lid -> (path, lpath)
-		self.notifications = [] # queue of handles
-		self._sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-		self._sock.connect(SOCK_PATH)
-		self._lock = RLock()
+    def __init__(self):
+        self._paths = {}     # path -> (lid, lpath)
+        self._lids = {}      # lid -> (path, lpath)
+        self._pl_lock = RLock() # lock for lids and paths
 
-		self._serialno = 0
-		self.cbs = {}
+        self._sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self._sock.connect(SOCK_PATH)
+        self._sock_lock = RLock()
+        self._readlink_cb = None
 
-	def _nextserial(self):
-		# TODO must have lock, all calls already do, though
-		self._serialno += 1
-		return self._serialno
+        self._serialno = self.serial()
 
-	def _send(self, request):
-		try:
-			self._lock.acquire()
-			
-			msg = '%.4d%s' % (len(request), request)
-			_debug('send: %s' % msg)
-			self._sock.send(msg)
-		finally:
-			self._lock.release()
+        self._messages = {}
+        self._messages_serial = self.serial()
+        self._messages_cv = Condition()
 
+    # TODO How do I get thread safety in generators?
+    # with and wo finally on release don't seem to work
+    def serial(self):
+        serial = 0
+        while True:
+            serial += 1
+            yield serial
 
-	def getlinkfor(self, path):
-		"""Porcelain for getlink.  Caller passes in path they want
-		a waitfs link for.  The connection will track the association
-		from lid -> (path, linkpath) for the user."""
-		def getlinkforcb(self, lid, lpath):
-			try:
-				self._lock.acquire()
-				self.paths[path] = (lid, lpath)
-				self.lids[lid] = (path, lpath)
-				_debug('symlink %s %s' % (path, lpath))
-				os.symlink(lpath, path)
-			finally:
-				self._lock.release()
-		self.getlink(getlinkforcb)
+    def _send(self, request):
+        try:
+            self._sock_lock.acquire()
 
-	def getlink(self, cb):
-		try:
-			self._lock.acquire()
+            msg = '%.4d%s' % (len(request), request)
+            _debug('send: %s' % msg)
+            self._sock.send(msg)
+        finally:
+            self._sock_lock.release()
 
-			# TODO this needs to have a unique id instead
-			serialno = self._nextserial()
-			self.cbs[serialno] = cb
-			request = '%s %d' % (GETLINK_CMD, serialno)
-			_debug('Request: %s' % request)
-			self._send(request)
-		finally:
-			self._lock.release()
+    def _block_until(self, pred):
+        while True:
+            try:
+                _debug('Attempting to acquire responses_cv')
+                self._messages_cv.acquire()
+                for k, v in self._messages.items():
+                    if pred(v):
+                        _debug('Found matching response, returning')
+                        del self._messages[k]
+                        return v
+                _debug('Going to sleep waiting for response')
+                self._messages_cv.wait()
+            finally:
+                self._messages_cv.release()
 
-	def _handle_getlink_response(self, response):
-		results = response.split()
-		if len(results) != 5 or results[0] != GETLINK_CMD:
-			print repr(results)
-			raise unexpected_response(response)
-		if results[2] == ERROR_CMD:
-			raise failed_response(results)
-		elif results[2] != OK_CMD:
-			raise unexpected_response(response)
+    def getlinkfor(self, path):
+        """Porcelain for getlink.  Caller passes in path they want
+        a waitfs link for.  The connection will track the association
+        from lid -> (path, linkpath) for the user."""
+        _debug('getlinkfor %s' % path)
+        lid, lpath = self.getlink()
+        try:
+            self._pl_lock.acquire()
+            self._paths[path] = (lid, lpath)
+            self._lids[lid] = (path, lpath)
+        finally:
+            self._pl_lock.release()
+        return lpath
 
-		serialno = int(results[1])
+    def getlink(self):
+        _debug('getlink')
+        serialno = self._serialno.next()
+        request = '%s %d' % (GETLINK_CMD, serialno)
+        _debug('Request: %s' % request)
+        self._send(request)
 
-		lid, lpath = results[3:]
-		lid = int(lid)
+        def gl_pred(res):
+            r = res.split()
+            return r[0] == GETLINK_CMD and int(r[1]) == serialno
+        response = self._block_until(gl_pred)
 
-		try:
-			self._lock.acquire()
-			cb = self.cbs[serialno]
-			del self.cbs[serialno]
-		finally:
-			self._lock.release()
+        results = response.split()
+        if len(results) != 5 or results[0] != GETLINK_CMD:
+            print repr(results)
+            raise unexpected_response(response)
+        if results[2] == ERROR_CMD:
+            raise failed_response(results)
+        elif results[2] != OK_CMD:
+            raise unexpected_response(response)
 
-		cb(self, lid, lpath)
+        serialno = int(results[1])
 
-	def setlinkfor(self, path, contentpath):
-		"""Atomically moves contentpath to path and notifies the waitfs
-		daemon by performing setlink on the appropriate (lid, path)"""
-		def setlinkforcb(self, lid, path):
-			try:
-				self._lock.acquire()
-				del self.paths[path]
-				del self.lids[lid]
-			finally:
-				self._lock.release()
+        lid, lpath = results[3:]
+        lid = int(lid)
 
-		try:
-			self._lock.acquire()
-			lid, lpath = self.paths[path]
-			os.rename(contentpath, path)
-		finally:
-			self._lock.release()
+        return lid, lpath
 
-		cb = lambda: setlinkforcb(self, lid, path)
-		self.setlink(lid, path, cb)
+    def setlinkfor(self, path):
+        """After an atomic move of contentpath to path, notifies the waitfs
+        daemon by performing setlink on the appropriate (lid, path)"""
+        _debug('setlinkfor %s' % path)
+        try:
+            self._pl_lock.acquire()
+            lid, lpath = self._paths[path]
+        finally:
+            self._pl_lock.release()
 
-	def setlink(self, lid, path, cb):
-		try:
-			self._lock.acquire()
-			serialno = self._nextserial()
-			self.cbs[serialno] = cb
-			request = '%s %d %d %s' % (SETLINK_CMD,
-										 serialno,
-										 lid, path)
-			_debug('Request: %s' % request)
-			self._send(request)
-		finally:
-			self._lock.release()
+        self.setlink(lid, path)
 
-	def _handle_setlink_response(self, response):
-		results = response.split()
-		if len(results) != 3 or results[0] != SETLINK_CMD:
-			raise unexpected_response(response)
-		if results[2] == ERROR_CMD:
-			raise failed_response(results)
-		elif results[2] != OK_CMD:
-			raise unexpected_response(response)
+        try:
+            self._pl_lock.acquire()
+            del self._paths[path]
+            del self._lids[lid]
+        finally:
+            self._pl_lock.release()
 
-		serialno = int(results[1])
-		try:
-			self._lock.acquire()
-			cb = self.cbs[serialno]
-			del self.cbs[serialno]
-		finally:
-			self._lock.release()
+    def setlink(self, lid, path):
+        _debug('setlink %d %s' % (lid, path))
+        serialno = self._serialno.next()
+        request = '%s %d %d %s' % (SETLINK_CMD,
+                                     serialno,
+                                     lid, path)
+        _debug('Request: %s' % request)
+        self._send(request)
 
-		cb()
+        def sl_pred(res):
+            r = res.split()
+            return r[0] == SETLINK_CMD and int(r[1]) == serialno
+        response = self._block_until(sl_pred)
 
-	def _handle_readlink_response(self, response, readlink_cb):
-		_debug('Handling readlink: %s' % response)
-		results = response.split()
-		if len(results) != 3 or results[0] != READLINK_CMD:
-			raise unexpected_response(response)
+        results = response.split()
+        if len(results) != 3 or results[0] != SETLINK_CMD:
+            raise unexpected_response(response)
+        if results[2] == ERROR_CMD:
+            raise failed_response(results)
+        elif results[2] != OK_CMD:
+            raise unexpected_response(response)
 
-		lid, lpath = results[1:]
-		lid = int(lid)
+    def _handle_readlink_response(self, response):
+        _debug('Handling readlink: %s' % response)
+        results = response.split()
+        if len(results) != 3 or results[0] != READLINK_CMD:
+            raise unexpected_response(response)
 
-		try:
-			self._lock.acquire()
-			path, lpath2 = self.lids[lid]
-			assert(lpath == lpath2)
-		finally:
-			self._lock.release()
+        lid, lpath = results[1:]
+        lid = int(lid)
 
-		readlink_cb(path)
+        try:
+            self._pl_lock.acquire()
+            path, lpath2 = self._lids[lid]
+            assert(lpath == lpath2)
+            self.readlink_cb(path)
+        except KeyError:
+            _debug('WARNING: discarding readlink on unknown lid')
+            _debug('WARNING: probably result of repeated readlinks')
+        finally:
+            self._pl_lock.release()
 
-	def _handle_error_response(self, response):
-		try:
-			i = response.find(' ')
-			msg = response[i + 1:]
-		except ValueError:
-			msg = 'Unknown, no reason specified by the server'
-		raise failed_response(msg)
+    def start_monitor(self, readlink_cb):
+        """Dispatch incoming data from waitfs, readlinks will be handled by the
+        callable specified as readlink_cb, gets local path that was 'accessed'
+        back as an argument"""
+        self.readlink_cb = readlink_cb
+        c = self
 
-	def monitor(self, readlink_cb):
-		"""Dispatch incoming data from waitfs, readlinks will be handled by the
-		callable specified as readlink_cb, gets local path that was 'accessed'
-		back as an argument"""
-		rlcb = lambda response: self._handle_readlink_response(response,
-															   readlink_cb)
-		dispatch = { GETLINK_CMD: self._handle_getlink_response,
-					 SETLINK_CMD: self._handle_setlink_response,
-					 READLINK_CMD: rlcb,
-					 ERROR_CMD: self._handle_error_response }
-		import time
-		c = 0
-		while True:
-			c += 1
-			time.sleep(.1)
-			if not (c % 10):
-				_debug('_monitor iteration')
-			try:
-				self._lock.acquire()
-				# read length of incoming data first
-				l = int(self._sock.recv(4))
-				_debug('Incoming data length: %d' % l)
-				response = self._sock.recv(l)
-				hdr = response.split()[0]
-				_debug('Dispatching to %s from %s' % (hdr, response))
-				dispatch[hdr](response)
-			finally:
-				self._lock.release()
-		
-	def popaccessed(self):
-		try:
-			self._lock.acquire()
-			if len(self.notifications) == 0:
-				return None
-			else:
-				lid = self.notifications.pop()
-				# TODO need to lookup on lid to get path
-				path, lpath = self.lids[lid]
-				return path
-		finally:
-			self._lock.release()
+        import time
+        import select
+        class Monitor(Thread):
+            def __init__(self):
+                super(Monitor, self).__init__()
+                self.daemon = True
+
+            def run(self):
+                incmsg = ''
+                incmsglen = 0
+                remain = 4
+                while True:
+                    _debug('_monitor iteration')
+                    readable, _, _ = select.select([c._sock], [], [])
+                    _debug('Processing incoming message')
+                    if c._sock in readable:
+                        try:
+                            c._sock_lock.acquire()
+                            _debug('Need to recv %d more' % remain)
+                            r = c._sock.recv(remain)
+                            _debug('recv: %s' % repr(r))
+                            incmsg += r
+                            remain -= len(r)
+                            if incmsglen == 0: # if we are still finding len hdr
+                                if remain == 0:
+                                    incmsglen = int(incmsg[:4])
+                                    remain = incmsglen
+                                    incmsg = ''
+                                    _debug('recv inc data length: %d' % incmsglen)
+                            else: # if we are reading actual msg after header
+                                if remain == 0:
+                                    _debug('recv inc data %s' % incmsg)
+                                    try:
+                                        c._messages_cv.acquire()
+                                        s = c._messages_serial.next()
+                                        c._messages[s] = incmsg
+                                        print c._messages
+                                        c._messages_cv.notifyAll()
+                                    finally:
+                                        c._messages_cv.release()
+                                    incmsg = ''
+                                    incmsglen = 0
+                                    remain = 4
+                        finally:
+                            c._sock_lock.release()
+        Monitor().start()
+
+        class ReadLinkWorker(Thread):
+            def __init__(self, response):
+                super(ReadLinkWorker, self).__init__()
+                self.response = response
+                self.daemon = True
+
+            def run(self):
+                _debug('ReadLinkWorker invoking callback')
+                c._handle_readlink_response(self.response)
+
+        class ReadLinkDispatcher(Thread):
+            def __init__(self):
+                super(ReadLinkDispatcher, self).__init__()
+                self.daemon = True
+
+            def run(self):
+                while True:
+                    def rl_pred(res):
+                        r = res.split()
+                        return r[0] == READLINK_CMD
+                    _debug('ReadLinkDispatcher waiting for interesting messages')
+                    response = c._block_until(rl_pred)
+                    _debug('ReadLinkDispatcher starting handler thread')
+                    ReadLinkWorker(response).start()
+
+        ReadLinkDispatcher().start()
 
